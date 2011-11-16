@@ -52,10 +52,10 @@ typedef struct _cl_dx9_surface_info_khr
 #define CL_DX9_MEDIA_SURFACE_NOT_ACQUIRED_KHR           -1013
 
 // cl_media_adapter_type_khr
-#define CL_D3D9_DEVICE_KHR                               0x2020
-#define CL_D3D9EX_DEVICE_KHR                             0x2021
-#define CL_DXVA_DEVICE_KHR                               0x2022
-    
+#define CL_ADAPTER_D3D9_KHR                              0x2020
+#define CL_ADAPTER_D3D9EX_KHR                            0x2021
+#define CL_ADAPTER_DXVA_KHR                              0x2022
+
 // cl_media_adapter_set_khr
 #define CL_PREFERRED_DEVICES_FOR_DX9_MEDIA_ADAPTER_KHR   0x2023
 #define CL_ALL_DEVICES_FOR_DX9_MEDIA_ADAPTER_KHR         0x2024
