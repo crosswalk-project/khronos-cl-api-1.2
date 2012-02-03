@@ -42,6 +42,9 @@ typedef struct _cl_dx9_surface_info_khr
     IDirect3DSurface9 *resource;
     HANDLE shared_handle;
 } cl_dx9_surface_info_khr;
+    
+typedef cl_uint             cl_media_adapter_type_khr;
+typedef cl_uint             cl_media_adapter_set_khr;
 
 /******************************************************************************/
 
@@ -61,9 +64,9 @@ typedef struct _cl_dx9_surface_info_khr
 #define CL_ALL_DEVICES_FOR_DX9_MEDIA_ADAPTER_KHR         0x2024
 
 // cl_context_info
-#define CL_CONTEXT_D3D9_DEVICE_KHR                       0x2025
-#define CL_CONTEXT_D3D9EX_DEVICE_KHR                     0x2026
-#define CL_CONTEXT_DXVA_DEVICE_KHR                       0x2027
+#define CL_CONTEXT_ADAPTER_D3D9_KHR                      0x2025
+#define CL_CONTEXT_ADAPTER_D3D9EX_KHR                    0x2026
+#define CL_CONTEXT_ADAPTER_DXVA_KHR                      0x2027
 
 // cl_mem_info
 #define CL_MEM_DX9_MEDIA_ADAPTER_TYPE_KHR                0x2028
