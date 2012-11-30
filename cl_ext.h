@@ -134,15 +134,15 @@ typedef CL_API_ENTRY cl_int (CL_API_CALL *clIcdGetPlatformIDsKHR_fn)(
  * cl_khr_initalize_memory extension *
  *************************************/
     
-#define CL_CONTEXT_MEMORY_INITIALIZE_KHR
+#define CL_CONTEXT_MEMORY_INITIALIZE_KHR            0x200E
     
     
 /**************************************
  * cl_khr_terminate_context extension *
  **************************************/
     
-#define CL_DEVICE_TERMINATE_CAPABILITY_KHR
-#define CL_CONTEXT_TERMINATE_KHR
+#define CL_DEVICE_TERMINATE_CAPABILITY_KHR          0x200F
+#define CL_CONTEXT_TERMINATE_KHR                    0x2010
 
 #define cl_khr_terminate_context 1
 extern CL_API_ENTRY cl_int CL_API_CALL clTerminateContextKHR(cl_context /* context */) CL_EXT_SUFFIX_VERSION_1_2;
