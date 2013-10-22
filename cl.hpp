@@ -31,9 +31,10 @@
  *       Brian Cole, March 3rd 2010 and April 2012 
  *       Matt Gruenke, April 2012.
  *       Bruce Merry, February 2013.
+ *       Tom Deakin and Simon McIntosh-Smith, July 2013
  *   
- *   \version 1.2.5
- *   \date June 2013
+ *   \version 1.2.6
+ *   \date August 2013
  *
  *   Optional extension support
  *
@@ -2416,7 +2417,7 @@ public:
         }
     }
 
-    /*! \brief Constructs a context including all devices of a specified type.
+    /*! \brief Constructs a context including all or a subset of devices of a specified type.
      *
      *  Wraps clCreateContextFromType().
      */
@@ -2434,17 +2435,61 @@ public:
         cl_int error;
 
 #if !defined(__APPLE__) || !defined(__MACOS)
-        cl_context_properties prop[4] = {CL_CONTEXT_PLATFORM, 0, 0, 0 };	
+        cl_context_properties prop[4] = {CL_CONTEXT_PLATFORM, 0, 0, 0 };
+
         if (properties == NULL) {
-            prop[1] = (cl_context_properties)Platform::get(&error)();
+            // Get a valid platform ID as we cannot send in a blank one
+            VECTOR_CLASS<Platform> platforms;
+            error = Platform::get(&platforms);
             if (error != CL_SUCCESS) {
                 detail::errHandler(error, __CREATE_CONTEXT_FROM_TYPE_ERR);
                 if (err != NULL) {
                     *err = error;
-                    return;
+                }
+                return;
+            }
+
+            // Check the platforms we found for a device of our specified type
+            cl_context_properties platform_id = 0;
+            for (unsigned int i = 0; i < platforms.size(); i++) {
+
+                VECTOR_CLASS<Device> devices;
+
+#if defined(__CL_ENABLE_EXCEPTIONS)
+                try {
+#endif
+
+                    error = platforms[i].getDevices(type, &devices);
+
+#if defined(__CL_ENABLE_EXCEPTIONS)
+                } catch (Error) {}
+    // Catch if exceptions are enabled as we don't want to exit if first platform has no devices of type
+    // We do error checking next anyway, and can throw there if needed
+#endif
+
+                // Only squash CL_SUCCESS and CL_DEVICE_NOT_FOUND
+                if (error != CL_SUCCESS && error != CL_DEVICE_NOT_FOUND) {
+                    detail::errHandler(error, __CREATE_CONTEXT_FROM_TYPE_ERR);
+                    if (err != NULL) {
+                        *err = error;
+                    }
+                }
+
+                if (devices.size() > 0) {
+                    platform_id = (cl_context_properties)platforms[i]();
+                    break;
                 }
             }
 
+            if (platform_id == 0) {
+                detail::errHandler(CL_DEVICE_NOT_FOUND, __CREATE_CONTEXT_FROM_TYPE_ERR);
+                if (err != NULL) {
+                    *err = CL_DEVICE_NOT_FOUND;
+                }
+                return;
+            }
+
+            prop[1] = platform_id;
             properties = &prop[0];
         }
 #endif
@@ -2977,6 +3022,11 @@ template< typename IteratorType >
 cl_int copy( IteratorType startIterator, IteratorType endIterator, cl::Buffer &buffer );
 template< typename IteratorType >
 cl_int copy( const cl::Buffer &buffer, IteratorType startIterator, IteratorType endIterator );
+template< typename IteratorType >
+cl_int copy( const CommandQueue &queue, IteratorType startIterator, IteratorType endIterator, cl::Buffer &buffer );
+template< typename IteratorType >
+cl_int copy( const CommandQueue &queue, const cl::Buffer &buffer, IteratorType startIterator, IteratorType endIterator );
+
 
 /*! \brief Class interface for Buffer Memory Objects.
  * 
@@ -3040,7 +3090,8 @@ public:
 
     /*!
      * \brief Construct a Buffer from a host container via iterators.
-     * If useHostPtr is specified iterators must be random access.
+     * IteratorType must be random access.
+     * If useHostPtr is specified iterators must represent contiguous data.
      */
     template< typename IteratorType >
     Buffer(
@@ -3087,6 +3138,15 @@ public:
             }
         }
     }
+
+    /*!
+     * \brief Construct a Buffer from a host container via iterators using a specified context.
+     * IteratorType must be random access.
+     * If useHostPtr is specified iterators must represent contiguous data.
+     */
+    template< typename IteratorType >
+    Buffer(const Context &context, IteratorType startIterator, IteratorType endIterator,
+        bool readOnly, bool useHostPtr = false, cl_int* err = NULL);
 
     //! \brief Default constructor - initializes to NULL.
     Buffer() : Memory() { }
@@ -3510,13 +3570,12 @@ public:
         cl_int* err = NULL)
     {
         cl_int error;
-        cl_image_desc desc;
-        desc.image_type = CL_MEM_OBJECT_IMAGE1D;
-        desc.image_width = width;
-        desc.image_row_pitch = 0;
-        desc.num_mip_levels = 0;
-        desc.num_samples = 0;
-        desc.buffer = 0;
+        cl_image_desc desc =
+        {
+            CL_MEM_OBJECT_IMAGE1D,
+            width,
+            0, 0, 0, 0, 0, 0, 0, 0
+        };
         object_ = ::clCreateImage(
             context(), 
             flags, 
@@ -3584,13 +3643,13 @@ public:
         cl_int* err = NULL)
     {
         cl_int error;
-        cl_image_desc desc;
-        desc.image_type = CL_MEM_OBJECT_IMAGE1D_BUFFER;
-        desc.image_width = width;
-        desc.image_row_pitch = 0;
-        desc.num_mip_levels = 0;
-        desc.num_samples = 0;
-        desc.buffer = buffer();
+        cl_image_desc desc =
+        {
+            CL_MEM_OBJECT_IMAGE1D_BUFFER,
+            width,
+            0, 0, 0, 0, 0, 0, 0,
+            buffer()
+        };
         object_ = ::clCreateImage(
             context(), 
             flags, 
@@ -3643,14 +3702,15 @@ public:
         cl_int* err = NULL)
     {
         cl_int error;
-        cl_image_desc desc;
-        desc.image_type = CL_MEM_OBJECT_IMAGE1D_ARRAY;
-        desc.image_array_size = arraySize;
-        desc.image_width = width;
-        desc.image_row_pitch = rowPitch;
-        desc.num_mip_levels = 0;
-        desc.num_samples = 0;
-        desc.buffer = 0;
+        cl_image_desc desc =
+        {
+            CL_MEM_OBJECT_IMAGE1D_ARRAY,
+            width,
+            0, 0,  // height, depth (unused)
+            arraySize,
+            rowPitch,
+            0, 0, 0, 0
+        };
         object_ = ::clCreateImage(
             context(), 
             flags, 
@@ -3729,14 +3789,15 @@ public:
 #if defined(CL_VERSION_1_2)
         if (useCreateImage)
         {
-            cl_image_desc desc;
-            desc.image_type = CL_MEM_OBJECT_IMAGE2D;
-            desc.image_width = width;
-            desc.image_height = height;
-            desc.image_row_pitch = row_pitch;
-            desc.num_mip_levels = 0;
-            desc.num_samples = 0;
-            desc.buffer = 0;
+            cl_image_desc desc =
+            {
+                CL_MEM_OBJECT_IMAGE2D,
+                width,
+                height,
+                0, 0, // depth, array size (unused)
+                row_pitch,
+                0, 0, 0, 0
+            };
             object_ = ::clCreateImage(
                 context(),
                 flags,
@@ -3905,16 +3966,17 @@ public:
         cl_int* err = NULL)
     {
         cl_int error;
-        cl_image_desc desc;
-        desc.image_type = CL_MEM_OBJECT_IMAGE2D_ARRAY;
-        desc.image_array_size = arraySize;
-        desc.image_width = width;
-        desc.image_height = height;
-        desc.image_row_pitch = rowPitch;
-        desc.image_slice_pitch = slicePitch;
-        desc.num_mip_levels = 0;
-        desc.num_samples = 0;
-        desc.buffer = 0;
+        cl_image_desc desc =
+        {
+            CL_MEM_OBJECT_IMAGE2D_ARRAY,
+            width,
+            height,
+            0,       // depth (unused)
+            arraySize,
+            rowPitch,
+            slicePitch,
+            0, 0, 0
+        };
         object_ = ::clCreateImage(
             context(), 
             flags, 
@@ -3994,16 +4056,17 @@ public:
 #if defined(CL_VERSION_1_2)
         if (useCreateImage)
         {
-            cl_image_desc desc;
-            desc.image_type = CL_MEM_OBJECT_IMAGE3D;
-            desc.image_width = width;
-            desc.image_height = height;
-            desc.image_depth = depth;
-            desc.image_row_pitch = row_pitch;
-            desc.image_slice_pitch = slice_pitch;
-            desc.num_mip_levels = 0;
-            desc.num_samples = 0;
-            desc.buffer = 0;
+            cl_image_desc desc =
+            {
+                CL_MEM_OBJECT_IMAGE3D,
+                width,
+                height,
+                depth,
+                0,      // array size (unused)
+                row_pitch,
+                slice_pitch,
+                0, 0, 0
+            };
             object_ = ::clCreateImage(
                 context(), 
                 flags, 
@@ -4574,41 +4637,7 @@ public:
 
     Program(
         const STRING_CLASS& source,
-        cl_int* err = NULL)
-    {
-        cl_int error;
-
-        const char * strings = source.c_str();
-        const ::size_t length  = source.size();
-
-        Context context = Context::getDefault(err);
-
-        object_ = ::clCreateProgramWithSource(
-            context(), (cl_uint)1, &strings, &length, &error);
-
-        detail::errHandler(error, __CREATE_PROGRAM_WITH_SOURCE_ERR);
-
-        if (error == CL_SUCCESS) {
-
-            error = ::clBuildProgram(
-                object_,
-                0,
-                NULL,
-                "",
-                NULL,
-                NULL);
-
-            detail::errHandler(error, __BUILD_PROGRAM_ERR);
-        }
-
-        if (err != NULL) {
-            *err = error;
-        }
-    }
-
-    Program(
-        const STRING_CLASS& source,
-		bool build,
+		bool build = false,
         cl_int* err = NULL)
     {
         cl_int error;
@@ -5089,6 +5118,37 @@ public:
                 *err = error;
             }
         }
+    }
+    /*!
+    * \brief Constructs a CommandQueue for an implementation defined device in the given context
+    */
+    explicit CommandQueue(
+        const Context& context,
+        cl_command_queue_properties properties = 0,
+        cl_int* err = NULL)
+    {
+        cl_int error;
+        VECTOR_CLASS<cl::Device> devices;
+        error = context.getInfo(CL_CONTEXT_DEVICES, &devices);
+
+        detail::errHandler(error, __CREATE_COMMAND_QUEUE_ERR);
+
+        if (error != CL_SUCCESS)
+        {
+            if (err != NULL) {
+                *err = error;
+            }
+            return;
+        }
+
+        object_ = ::clCreateCommandQueue(context(), devices[0](), properties, &error);
+
+        detail::errHandler(error, __CREATE_COMMAND_QUEUE_ERR);
+
+        if (err != NULL) {
+            *err = error;
+        }
+
     }
 
     CommandQueue(
@@ -6103,6 +6163,57 @@ __attribute__((weak)) CommandQueue CommandQueue::default_;
 __attribute__((weak)) volatile cl_int CommandQueue::default_error_ = CL_SUCCESS;
 #endif
 
+template< typename IteratorType >
+Buffer::Buffer(
+    const Context &context,
+    IteratorType startIterator,
+    IteratorType endIterator,
+    bool readOnly,
+    bool useHostPtr,
+    cl_int* err)
+{
+    typedef typename std::iterator_traits<IteratorType>::value_type DataType;
+    cl_int error;
+
+    cl_mem_flags flags = 0;
+    if( readOnly ) {
+        flags |= CL_MEM_READ_ONLY;
+    }
+    else {
+        flags |= CL_MEM_READ_WRITE;
+    }
+    if( useHostPtr ) {
+        flags |= CL_MEM_USE_HOST_PTR;
+    }
+    
+    ::size_t size = sizeof(DataType)*(endIterator - startIterator);
+
+    if( useHostPtr ) {
+        object_ = ::clCreateBuffer(context(), flags, size, static_cast<DataType*>(&*startIterator), &error);
+    } else {
+        object_ = ::clCreateBuffer(context(), flags, size, 0, &error);
+    }
+
+    detail::errHandler(error, __CREATE_BUFFER_ERR);
+    if (err != NULL) {
+        *err = error;
+    }
+
+    if( !useHostPtr ) {
+        CommandQueue queue(context, 0, &error);
+        detail::errHandler(error, __CREATE_BUFFER_ERR);
+        if (err != NULL) {
+            *err = error;
+        }
+
+        error = cl::copy(queue, startIterator, endIterator, *this);
+        detail::errHandler(error, __CREATE_BUFFER_ERR);
+        if (err != NULL) {
+            *err = error;
+        }
+    }
+}
+
 inline cl_int enqueueReadBuffer(
     const Buffer& buffer,
     cl_bool blocking,
@@ -6221,9 +6332,43 @@ inline cl_int enqueueCopyBuffer(
 
 /**
  * Blocking copy operation between iterators and a buffer.
+ * Host to Device.
+ * Uses default command queue.
  */
 template< typename IteratorType >
 inline cl_int copy( IteratorType startIterator, IteratorType endIterator, cl::Buffer &buffer )
+{
+    cl_int error;
+    CommandQueue queue = CommandQueue::getDefault(&error);
+    if (error != CL_SUCCESS)
+        return error;
+
+    return cl::copy(queue, startIterator, endIterator, buffer);
+}
+
+/**
+ * Blocking copy operation between iterators and a buffer.
+ * Device to Host.
+ * Uses default command queue.
+ */
+template< typename IteratorType >
+inline cl_int copy( const cl::Buffer &buffer, IteratorType startIterator, IteratorType endIterator )
+{
+    cl_int error;
+    CommandQueue queue = CommandQueue::getDefault(&error);
+    if (error != CL_SUCCESS)
+        return error;
+
+    return cl::copy(queue, buffer, startIterator, endIterator);
+}
+
+/**
+ * Blocking copy operation between iterators and a buffer.
+ * Host to Device.
+ * Uses specified queue.
+ */
+template< typename IteratorType >
+inline cl_int copy( const CommandQueue &queue, IteratorType startIterator, IteratorType endIterator, cl::Buffer &buffer )
 {
     typedef typename std::iterator_traits<IteratorType>::value_type DataType;
     cl_int error;
@@ -6232,7 +6377,7 @@ inline cl_int copy( IteratorType startIterator, IteratorType endIterator, cl::Bu
     ::size_t byteLength = length*sizeof(DataType);
 
     DataType *pointer = 
-        static_cast<DataType*>(enqueueMapBuffer(buffer, CL_TRUE, CL_MAP_WRITE, 0, byteLength, 0, 0, &error));
+        static_cast<DataType*>(queue.enqueueMapBuffer(buffer, CL_TRUE, CL_MAP_WRITE, 0, byteLength, 0, 0, &error));
     // if exceptions enabled, enqueueMapBuffer will throw
     if( error != CL_SUCCESS ) {
         return error;
@@ -6247,7 +6392,7 @@ inline cl_int copy( IteratorType startIterator, IteratorType endIterator, cl::Bu
     std::copy(startIterator, endIterator, pointer);
 #endif
     Event endEvent;
-    error = enqueueUnmapMemObject(buffer, pointer, 0, &endEvent);
+    error = queue.enqueueUnmapMemObject(buffer, pointer, 0, &endEvent);
     // if exceptions enabled, enqueueUnmapMemObject will throw
     if( error != CL_SUCCESS ) { 
         return error;
@@ -6258,9 +6403,11 @@ inline cl_int copy( IteratorType startIterator, IteratorType endIterator, cl::Bu
 
 /**
  * Blocking copy operation between iterators and a buffer.
+ * Device to Host.
+ * Uses specified queue.
  */
 template< typename IteratorType >
-inline cl_int copy( const cl::Buffer &buffer, IteratorType startIterator, IteratorType endIterator )
+inline cl_int copy( const CommandQueue &queue, const cl::Buffer &buffer, IteratorType startIterator, IteratorType endIterator )
 {
     typedef typename std::iterator_traits<IteratorType>::value_type DataType;
     cl_int error;
@@ -6269,14 +6416,14 @@ inline cl_int copy( const cl::Buffer &buffer, IteratorType startIterator, Iterat
     ::size_t byteLength = length*sizeof(DataType);
 
     DataType *pointer = 
-        static_cast<DataType*>(enqueueMapBuffer(buffer, CL_TRUE, CL_MAP_READ, 0, byteLength, 0, 0, &error));
+        static_cast<DataType*>(queue.enqueueMapBuffer(buffer, CL_TRUE, CL_MAP_READ, 0, byteLength, 0, 0, &error));
     // if exceptions enabled, enqueueMapBuffer will throw
     if( error != CL_SUCCESS ) {
         return error;
     }
     std::copy(pointer, pointer + length, startIterator);
     Event endEvent;
-    error = enqueueUnmapMemObject(buffer, pointer, 0, &endEvent);
+    error = queue.enqueueUnmapMemObject(buffer, pointer, 0, &endEvent);
     // if exceptions enabled, enqueueUnmapMemObject will throw
     if( error != CL_SUCCESS ) { 
         return error;
