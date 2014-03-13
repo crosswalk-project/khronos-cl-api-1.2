@@ -345,7 +345,7 @@ typedef struct _cl_buffer_region {
 #define CL_MEM_USE_HOST_PTR                         (1 << 3)
 #define CL_MEM_ALLOC_HOST_PTR                       (1 << 4)
 #define CL_MEM_COPY_HOST_PTR                        (1 << 5)
-// reserved                                         (1 << 6)    
+/* reserved                                         (1 << 6)    */
 #define CL_MEM_HOST_WRITE_ONLY                      (1 << 7)
 #define CL_MEM_HOST_READ_ONLY                       (1 << 8)
 #define CL_MEM_HOST_NO_ACCESS                       (1 << 9)
@@ -1165,7 +1165,7 @@ clGetExtensionFunctionAddressForPlatform(cl_platform_id /* platform */,
                                          const char *   /* func_name */) CL_API_SUFFIX__VERSION_1_2;
     
 
-// Deprecated OpenCL 1.1 APIs
+/* Deprecated OpenCL 1.1 APIs */
 extern CL_API_ENTRY CL_EXT_PREFIX__VERSION_1_1_DEPRECATED cl_mem CL_API_CALL
 clCreateImage2D(cl_context              /* context */,
                 cl_mem_flags            /* flags */,
